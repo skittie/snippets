@@ -1,8 +1,6 @@
 #!/usr/bin/env python2.7
 # -*- coding: utf-8 -*-
 
-# todo: clean up
-
 import sys, codecs, time, random, re
 
 from cobe.brain import Brain
@@ -19,9 +17,13 @@ sys.stdout = UTF8Writer(sys.stdout)
 
 replyrate = 50
 
-chans = ['#test']
-
+chans = ['#skittie','#lapio', '#ylis.fi']
+#class AI:
+#	def __init__(self):
+		
 ircnames = []
+
+
 
 class Bot(irc.IRCClient):
 	'''	def _get_nickname(self):
@@ -34,7 +36,7 @@ class Bot(irc.IRCClient):
 
 	def got_names(self,nicklist):
 		self.ircnames = nicklist
-		print nicklist
+		#print nicklist
 		self.ircnames = [s.replace('@','') for s in nicklist]
 		self.ircnames = [s.strip('+') for s in nicklist]
 		print self.ircnames
@@ -79,6 +81,7 @@ class Bot(irc.IRCClient):
 		self.replyrate = self.factory.replyrate
 		self.ignored = self.factory.ignored
 		self.trusted = self.factory.trusted
+		self.talking = self.factory.talking
 		
 		irc.IRCClient.connectionMade(self)
 		print("Connected")
@@ -97,10 +100,11 @@ class Bot(irc.IRCClient):
 			self.join(channel)
 			
 	def userJoined(self,user,channel):
-		print("userjoined "+user+" "+channel)
+		#print("userjoined "+user+" "+channel)
 		nick = user.split('!')[0]
 		reply = self.brain.reply("")
 		time.sleep(1)
+		self.ircnames.append(nick)
 		self.msg(channel,nick+": "+reply)
 		print(">>> [%s] %s" % (channel,reply))
 			
@@ -119,14 +123,14 @@ class Bot(irc.IRCClient):
 		msg = msg.decode('utf-8')
 		who = user if channel == self.nickname else channel
 		nick = user.split('!')[0]
-		print(user)
+#		print(user)
 		print("<<< [%s] <%s> %s" % (who, nick,msg))
 
 		if nick == self.nickname:
 			return
 
 		replyrate = self.replyrate
-		if msg.startswith(self.nickname):
+		if self.nickname in msg:
 			msg.replace(self.nickname+":","")
 			replyrate = 100
 			
@@ -136,17 +140,11 @@ class Bot(irc.IRCClient):
 #		p = re.compile(r'\b(' + ('|'.join(escaped_users)) + r')\b')
 #		msg = p.sub('skynet', msg)
 
-		
-		
-		# reply
-		reply = self.brain.reply(msg)
-		reply = reply.replace("#nick :", "#nick:")
-		reply = reply.replace("#nick", nick)
-		reply = reply.replace(self.nickname, nick)
+		# Commands
 				
 		if msg.startswith('!!') and user in self.trusted:
 			command = msg.lstrip('!').split(' ')
-			print(command)
+			print(str(command)+" from "+user)
 			try:
 				if command[0] == 'replyrate':
 					if len(command) > 1:
@@ -168,6 +166,27 @@ class Bot(irc.IRCClient):
 				elif command[0] == 'reload':
 					self.brain = Brain(self.factory.brain)
 					self.msg(who,"done")
+
+				elif command[0] == 'shutup' or command[0] == 'turpakiinni':
+					self.talking = False
+					self.msg(who,"okay.jpg")
+					
+				elif command[0] == 'wakeup':
+					self.talking = True
+					self.msg(who,"oho")
+					
+				elif command[0] == 'brain':
+					self.brain = Brain(command[1])
+					self.msg(who,"done")
+
+				elif command[0] == 'stemmer':
+					try:
+						brain.set_stemmer(command[1])
+						self.msg(who, "Stemmer set to "+command[1])
+					except Exception, e:
+						brain.set_stemmer("finnish")
+						self.msg(who, "Stemmer set to finnish")
+						self.msg(e)
 					
 				elif command[0] == 'quit':
 					self.quit("mo :D")
@@ -179,26 +198,57 @@ class Bot(irc.IRCClient):
 				elif command[0] == 'leave' or command[0] == 'part':
 					self.leave(command[1])
 					
+				elif command[0] == 'stats':
+					if command[1] == 'stems':
+						c = self.brain.graph.cursor()
+						count = c.execute("SELECT count(*) FROM token_stems").fetchone()
+						self.msg(who,str(count[0]))
+						
+					if command[1] == 'tokens':
+						c = self.brain.graph.cursor()
+						count = c.execute("SELECT count(*) FROM tokens").fetchone()
+						self.msg(who,str(count[0]))
+					
+					if command[1] == 'nodes':
+						c = self.brain.graph.cursor()
+						count = c.execute("SELECT count(*) FROM nodes").fetchone()
+						self.msg(who,str(count[0]))
+					
+					if command[1] == 'edges':
+						c = self.brain.graph.cursor()
+						count = c.execute("SELECT count(*) FROM edges").fetchone()
+						self.msg(who,str(count[0]))
+					
 			except Exception, e:
 				self.msg(who,str(e))
 				
 			return
 			
-		if random.random()*100 < replyrate:
-			if not nick in self.ignored:
-				self.msg(who,reply)
-				print(">>> [%s] %s" % (who,reply))
-			else:
-				print("Ignoring %s" % nick)
-				
-		self.brain.learn(msg)
+		# reply
+		
+		reply = self.brain.reply(msg)
+		reply = reply.replace("#nick :", "#nick:")
+		reply = reply.replace("#nick", nick)
+		reply = reply.replace(self.nickname, nick)
+			
+		if random.random()*100 < replyrate and self.talking:
+		#	if not nick in self.ignored:
+			self.msg(who,reply)
+			print(">>> [%s] %s" % (who,reply))
+		#	else:
+		#		print("Ignoring %s" % nick)
+
+		if not nick in self.ignored:
+			self.brain.learn(msg)
+		else:
+			print("Not learning from %s" % nick)
+			
 #		print u"%s".encode('utf-8') % b.reply(msg)
 
 class BotFactory(protocol.ClientFactory):
 	protocol = Bot
 
-	def __init__(self, nick, channels, trusted, password=None, brain="cobe.brain", replyrate=33, ignored = ['yuoppo']):
-			
+	def __init__(self, nick, channels, trusted, password, talking, brain="cobe.brain", replyrate=3, ignored = ['yuoppo']):	
 		self.nick = nick
 		self.channels = channels
 		self.trusted = trusted
@@ -206,6 +256,7 @@ class BotFactory(protocol.ClientFactory):
 		self.brain = brain
 		self.replyrate = replyrate
 		self.ignored = ignored
+		self.talking = talking
 		
 	def clientConnectionLost(self,connector,reason):
 		print("Connection lost. Reason: %s" % reason)
@@ -227,9 +278,9 @@ def main():
 	parser.add_option("-n", "--nick", action="store", dest="nick", default="skynet", help="Nickname to use")
 	parser.add_option("--password", action="store", dest="password", default=None, help="server password")
 	parser.add_option("-b", "--brain", action="store", dest="brain", default="cobe.brain", help="Brain file to use")
-	
+	parser.add_option("--talking", action="store_true", dest="talking", default=True, help="talking status")
 	parser.add_option("-v", "--verbose", action="store_true", dest="verbose", default=False, help="enable verbose output")
-	parser.add_option("-t", "--trust", action="append", dest="trusted", default=["skittie!emilia@nupit.se8.fi"], help="trusted hostmasks (admin)")
+	parser.add_option("-t", "--trust", action="append", dest="trusted", default=["skittie!emilia@nupit.se8.fi", "skittie!emilia@178.213.233.234"], help="trusted hostmasks (admin)")
 	print(parser.parse_args())
 	(options, channels) = parser.parse_args()
 	
@@ -240,7 +291,7 @@ def main():
 	if options.verbose:
 		log.startLogging(sys.stdout)
 	
-	factory = BotFactory(options.nick, channels, options.trusted, options.password)
+	factory = BotFactory(options.nick, channels, options.trusted, options.password, options.talking)
 	reactor.connectTCP(options.server, options.port, factory)
 	reactor.run()
 
